@@ -157,6 +157,8 @@ type
     function EditLoop(const CapHandle: HWND): Boolean;
     procedure EditWndProc(var Message: TMessage);
     procedure MouseBeginEdit;
+    function GetEditMenuTextMargin: Integer;
+    function GetEditMenuMidWidth: Integer;
   protected
     procedure CalcSize(const Canvas: TCanvas; var AWidth, AHeight: Integer);
       override;
@@ -173,6 +175,8 @@ type
     procedure Paint(const Canvas: TCanvas; const ClientAreaRect: TRect;
       IsSelected, IsPushed, UseDisabledShadow: Boolean); override;
     function UsesSameWidth: Boolean; override;
+    property EditMenuTextMargin: Integer read GetEditMenuTextMargin;
+    property EditMenuMidWidth: Integer Read GetEditMenuMidWidth;
   public
     property EditControl: TEdit read FEditControl;
   end;
@@ -215,8 +219,8 @@ uses
   TB2Common, TB2Consts;
 
 const
-  EditMenuTextMargin = 3;
-  EditMenuMidWidth = 4;
+  _EditMenuTextMargin = 3;
+  _EditMenuMidWidth = 4;
 
 type
   TControlAccess = class(TControl);
@@ -238,9 +242,16 @@ var
   I: Integer;
 begin
   if FEditCaption <> Value then begin
+// pyscripter mod
+    {$IF CompilerVersion >= 24}   // Delphi XE3 and up
+    for I := 0 to ClientCount - 1 do
+      if TBasicActionLink(Clients[I]) is TTBEditItemActionLink then
+        TTBEditItemActionLink(Clients[I]).SetEditCaption(Value);
+    {$ELSE}
     for I := 0 to FClients.Count - 1 do
       if TBasicActionLink(FClients[I]) is TTBEditItemActionLink then
         TTBEditItemActionLink(FClients[I]).SetEditCaption(Value);
+    {$IFEND}
     FEditCaption := Value;
     Change;
   end;
@@ -251,9 +262,16 @@ var
   I: Integer;
 begin
   if FEditOptions <> Value then begin
+// pyscripter mod
+    {$IF CompilerVersion >= 24}   // Delphi XE3 and up
+    for I := 0 to ClientCount - 1 do
+      if TBasicActionLink(Clients[I]) is TTBEditItemActionLink then
+        TTBEditItemActionLink(Clients[I]).SetEditOptions(Value);
+    {$ELSE}
     for I := 0 to FClients.Count - 1 do
       if TBasicActionLink(FClients[I]) is TTBEditItemActionLink then
         TTBEditItemActionLink(FClients[I]).SetEditOptions(Value);
+    {$IFEND}
     FEditOptions := Value;
     Change;
   end;
@@ -264,9 +282,16 @@ var
   I: Integer;
 begin
   if FEditWidth <> Value then begin
+// pyscripter mod
+    {$IF CompilerVersion >= 24}   // Delphi XE3 and up
+    for I := 0 to ClientCount - 1 do
+      if TBasicActionLink(Clients[I]) is TTBEditItemActionLink then
+        TTBEditItemActionLink(Clients[I]).SetEditWidth(Value);
+    {$ELSE}
     for I := 0 to FClients.Count - 1 do
       if TBasicActionLink(FClients[I]) is TTBEditItemActionLink then
         TTBEditItemActionLink(FClients[I]).SetEditWidth(Value);
+    {$IFEND}
     FEditWidth := Value;
     Change;
   end;
@@ -281,9 +306,16 @@ begin
   {$ELSE}
   if @FOnAcceptText <> @Value then begin
   {$ENDIF}
+// pyscripter mod
+    {$IF CompilerVersion >= 24}   // Delphi XE3 and up
+    for I := 0 to ClientCount - 1 do
+      if TBasicActionLink(Clients[I]) is TTBEditItemActionLink then
+        TTBEditItemActionLink(Clients[I]).SetOnAcceptText(Value);
+    {$ELSE}
     for I := 0 to FClients.Count - 1 do
       if TBasicActionLink(FClients[I]) is TTBEditItemActionLink then
         TTBEditItemActionLink(FClients[I]).SetOnAcceptText(Value);
+    {$IFEND}
     FOnAcceptText := Value;
     Change;
   end;
@@ -294,9 +326,16 @@ var
   I: Integer;
 begin
   if FText <> Value then begin
+// pyscripter mod
+    {$IF CompilerVersion >= 24}   // Delphi XE3 and up
+    for I := 0 to ClientCount - 1 do
+      if TBasicActionLink(Clients[I]) is TTBEditItemActionLink then
+        TTBEditItemActionLink(Clients[I]).SetText(Value);
+    {$ELSE}
     for I := 0 to FClients.Count - 1 do
       if TBasicActionLink(FClients[I]) is TTBEditItemActionLink then
         TTBEditItemActionLink(FClients[I]).SetText(Value);
+    {$IFEND}
     FText := Value;
     Change;
   end;
@@ -569,6 +608,16 @@ begin
   end;
 end;
 
+function TTBEditItemViewer.GetEditMenuMidWidth: Integer;
+begin
+  Result := PPIScale(_EditMenuMidWidth);
+end;
+
+function TTBEditItemViewer.GetEditMenuTextMargin: Integer;
+begin
+  Result := PPIScale(_EditMenuTextMargin);
+end;
+
 procedure TTBEditItemViewer.GetEditRect(var R: TRect);
 var
   Item: TTBEditItem;
@@ -596,8 +645,8 @@ var
 begin
   Item := TTBEditItem(Self.Item);
   DC := Canvas.Handle;
-  AWidth := Item.FEditWidth;
-  AHeight := GetTextHeight(DC) + (EditMenuTextMargin * 2) + 1;
+  AWidth := PPIScale(Item.FEditWidth);
+  AHeight := GetTextHeight(DC) + (EditMenuTextMargin * 2) + PPIScale(1);
   if not IsToolbarStyle and (Item.EditCaption <> '') then begin
     Inc(AWidth, GetTextWidth(DC, Item.EditCaption, True) + EditMenuMidWidth +
       EditMenuTextMargin * 2);
@@ -676,7 +725,7 @@ begin
     Exit;
   GetEditRect(R);
   OffsetRect(R, -BoundsRect.Left, -BoundsRect.Top);
-  InflateRect(R, -2, -2);
+  InflateRect(R, -PPIScale(2), -PPIScale(2));
   if PtInRect(R, Pt) then
     ACursor := LoadCursor(0, IDC_IBEAM);
 end;
@@ -823,7 +872,7 @@ begin
   FocusWnd := GetFocus;
 
   { Create the edit control }
-  InflateRect(R, -3, -3);
+  InflateRect(R, -PPIScale(3), -PPIScale(3));
   //View.FreeNotification(Self);
   FEditControl := TEdit.Create(nil);
   try

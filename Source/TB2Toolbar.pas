@@ -298,6 +298,23 @@ uses
   {$IFDEF CLR} System.Runtime.InteropServices, System.Text, {$ENDIF}
   TB2Consts, TB2Common, TB2Hook;
 
+{$IFDEF WIN64}
+type
+  TSmallPoint = TPoint;
+
+function SmallPointToPoint(const P: TPoint): TPoint;
+begin
+  Result.X := P.X;
+  Result.Y := P.Y;
+end;
+
+function PointToSmallPoint(const P: TPoint): TPoint;
+begin
+  Result.X := P.X;
+  Result.Y := P.Y;
+end;
+{$ENDIF WIN64}
+
 const
   { Constants for TTBCustomToolbar-specific registry values. Do not localize! }
   rvFloatRightX = 'FloatRightX';
@@ -558,7 +575,7 @@ begin
   FShrinkMode := tbsmChevron;
   FSystemFont := True;
   Color := clBtnFace;
-  SetBounds(Left, Top, 23, 22);{}
+  SetBounds(Left, Top, PPIScale(23), PPIScale(22));{}
 end;
 
 destructor TTBCustomToolbar.Destroy;
@@ -1246,7 +1263,7 @@ var
 begin
   DT := TBGetDockTypeOf(CurrentDock, Floating);
   FView.Orientation := DockTypeToOrientation[DT];
-  FView.ChevronSize := tbChevronSize;
+  FView.ChevronSize := PPIScale(tbChevronSize);
   if Assigned(CurrentDock) or Floating then begin
     FView.ChevronOffset := CalcChevronOffset(CurrentDock, FView.Orientation);
     FView.WrapOffset := CalcWrapOffset(CurrentDock);
@@ -1319,7 +1336,7 @@ begin
     Result.X := 0;
     Result.Y := 0;
     FView.CalculatePositions(False, O, CalcWrapOffset(NewDock),
-      CalcChevronOffset(NewDock, O), tbChevronSize, TempBaseSize, Result,
+      CalcChevronOffset(NewDock, O), PPIScale(tbChevronSize), TempBaseSize, Result,
       FLastWrappedLines);
   end;
 end;
@@ -1439,8 +1456,8 @@ begin
             NewSize := N.X - S.X
           else
             NewSize := N.Y - S.Y;
-          if NewSize > MaxDistance then
-            NewSize := MaxDistance;
+          if NewSize > PPIScale(MaxDistance) then
+            NewSize := PPIScale(MaxDistance);
           DistanceToLargerSize := NewSize;
         end;
         if I < NewSizes.Count-1 then begin
@@ -1449,8 +1466,8 @@ begin
             NewSize := S.X - N.X
           else
             NewSize := S.Y - N.Y;
-          if NewSize > MaxDistance then
-            NewSize := MaxDistance;
+          if NewSize > PPIScale(MaxDistance) then
+            NewSize := PPIScale(MaxDistance);
           DistanceToSmallerSize := NewSize;
         end;
         Break;
@@ -1582,7 +1599,7 @@ begin
     Inc(AMinimumSize, NonClientWidth)
   else
     Inc(AMinimumSize, NonClientHeight);
-  Inc(AMinimumSize, tbChevronSize);
+  Inc(AMinimumSize, PPIScale(tbChevronSize));
 end;
 
 procedure TTBCustomToolbar.BeginUpdate;

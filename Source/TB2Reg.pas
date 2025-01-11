@@ -65,10 +65,13 @@ implementation
 
 uses
   {$IFDEF CLR} WinUtils, {$ENDIF}
+  {$IF CompilerVersion >= 24} // for Delphi XE3 and up
+  Actions,
+  System.UITypes,
+  {$IFEND}
   ImgEdit;
 
 {$IFDEF JR_D5}
-
 { TTBImageIndexPropertyEditor }
 
 { Unfortunately TComponentImageIndexPropertyEditor seems to be gone in
@@ -183,6 +186,101 @@ end;
 
 {$ENDIF}
 
+{ TTBItemImageNamePropertyEditor }
+{$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+type
+  TTBItemImageNamePropertyEditor = class(TStringProperty, ICustomPropertyListDrawing)
+  public
+    function GetAttributes: TPropertyAttributes; override;
+    procedure GetValues(Proc: TGetStrProc); override;
+    function GetImageListAt(Index: Integer): TCustomImageList; virtual;
+
+    // ICustomPropertyListDrawing
+    procedure ListMeasureHeight(const Value: string; ACanvas: TCanvas; var AHeight: Integer);
+    procedure ListMeasureWidth(const Value: string; ACanvas: TCanvas; var AWidth: Integer);
+    procedure ListDrawValue(const Value: string; ACanvas: TCanvas; const ARect: TRect; ASelected: Boolean);
+  end;
+
+function TTBItemImageNamePropertyEditor.GetAttributes: TPropertyAttributes;
+begin
+  Result := [paMultiSelect, paValueList, paRevertable];
+end;
+
+function TTBItemImageNamePropertyEditor.GetImageListAt(Index: Integer): TCustomImageList;
+// Same as TTBItemImageIndexPropertyEditor.GetImageListAt
+var
+  C: TPersistent;
+  Item: TTBCustomItem;
+begin
+  Result := nil;
+  { ? I'm guessing that the Index parameter is a component index (one that
+    would be passed to the GetComponent function). }
+  C := GetComponent(Index);
+  if C is TTBCustomItem then begin
+    Item := TTBCustomItem(C);
+    repeat
+      Result := Item.Images;
+      if Assigned(Result) then
+        Break;
+      Item := Item.Parent;
+      if Item = nil then
+        Break;
+      Result := Item.SubMenuImages;
+    until Assigned(Result);
+  end;
+end;
+
+procedure TTBItemImageNamePropertyEditor.GetValues(Proc: TGetStrProc);
+var
+  ImgList: TCustomImageList;
+  I: Integer;
+begin
+  ImgList := GetImageListAt(0);
+  if Assigned(ImgList) and ImgList.IsImageNameAvailable then
+    for I := 0 to ImgList.Count-1 do
+      Proc(ImgList.GetNameByIndex(I));
+end;
+
+procedure TTBItemImageNamePropertyEditor.ListDrawValue(const Value: string;
+  ACanvas: TCanvas; const ARect: TRect; ASelected: Boolean);
+var
+  ImgList: TCustomImageList;
+  X: Integer;
+begin
+  ImgList := GetImageListAt(0);
+  ACanvas.FillRect(ARect);
+  X := ARect.Left + 2;
+  if Assigned(ImgList) then begin
+    ImgList.Draw(ACanvas, X, ARect.Top + 2, ImgList.GetIndexByName(Value));
+    Inc(X, ImgList.Width);
+  end;
+  ACanvas.TextOut(X + 3, ARect.Top + 1, Value);
+end;
+
+procedure TTBItemImageNamePropertyEditor.ListMeasureHeight(const Value: string;
+  ACanvas: TCanvas; var AHeight: Integer);
+var
+  ImgList: TCustomImageList;
+begin
+  ImgList := GetImageListAt(0);
+  AHeight := ACanvas.TextHeight(Value) + 2;
+  if Assigned(ImgList) and (ImgList.Height + 4 > AHeight) then
+    AHeight := ImgList.Height + 4;
+end;
+
+procedure TTBItemImageNamePropertyEditor.ListMeasureWidth(const Value: string;
+  ACanvas: TCanvas; var AWidth: Integer);
+var
+  ImgList: TCustomImageList;
+begin
+  ImgList := GetImageListAt(0);
+  AWidth := ACanvas.TextWidth(Value) + 4;
+  if Assigned(ImgList) then
+    Inc(AWidth, ImgList.Width);
+end;
+{$IFEND}
+
+
 { TTBImageListEditor }
 
 type
@@ -287,9 +385,15 @@ begin
   RegisterComponentEditor(TTBImageList, TTBImageListEditor);
   RegisterPropertyEditor(TypeInfo(TTBRootItem), nil, '', TTBItemsPropertyEditor);
   {$IFDEF JR_D5}
-  RegisterPropertyEditor(TypeInfo(TImageIndex), TTBCustomItem, 'ImageIndex',
-    TTBItemImageIndexPropertyEditor);
+  RegisterPropertyEditor(TypeInfo(TImageIndex), TTBCustomItem, 'ImageIndex', TTBItemImageIndexPropertyEditor);
   {$ENDIF}
+  {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+  // Register ImageName property editor for TTBCustomItem descendants,
+  // this is needed to show the preview of images in the Object Inspector.
+  RegisterPropertyEditor(TypeInfo(TImageName), TTBCustomItem, '', TTBItemImageNamePropertyEditor);
+  {$IFEND}
+
+
   {$IFDEF JR_D6}
   { TShortCut properties show up like Integer properties in Delphi 6
     without this... }

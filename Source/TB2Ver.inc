@@ -50,7 +50,7 @@
     {$DEFINE JR_WIDESTR}  { defined if String type = WideString }
   {$IFEND}
   {$IF not Defined(CLR) and (SizeOf(Pointer) <> 4)}
-    {$MESSAGE WARN 'This version of Toolbar2000 has not been tested on 64-bit Delphi for Win32'}
+    // Robert: {$MESSAGE WARN 'This version of Toolbar2000 has not been tested on 64-bit Delphi for Win32'}
   {$IFEND}
 {$ENDIF}
 
@@ -62,3 +62,7 @@
 {$IFDEF JR_D6}
   {$WARN SYMBOL_PLATFORM OFF}
 {$ENDIF}
+{$IF CompilerVersion >= 25} // for Delphi XE4 and up
+  {$LEGACYIFEND ON} // requires $IF to be terminated with $ENDIF instead of $IFEND
+{$IFEND}
+

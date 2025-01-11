@@ -120,6 +120,8 @@ type
   end;
 
 implementation
+Uses
+  TB2Common;
 
 const
   { Constants for TTBToolWindow-specific registry values. Do not localize! }
@@ -135,7 +137,10 @@ begin
   FMinClientWidth := 32;
   FMinClientHeight := 32;
   { Initialize the client size to 32x32 }
-  SetBounds(Left, Top, 32, 32);
+  // Make sure Width/Height are included in ScalingFlags on
+  // TControl.ChangeScale when csLoading
+  Width := FMinClientWidth;
+  Height := FMinClientHeight;
 end;
 
 procedure TTBToolWindow.Paint;
@@ -177,10 +182,10 @@ end;
 procedure TTBToolWindow.GetMinMaxSize(var AMinClientWidth, AMinClientHeight,
   AMaxClientWidth, AMaxClientHeight: Integer);
 begin
-  AMinClientWidth := FMinClientWidth;
-  AMinClientHeight := FMinClientHeight;
-  AMaxClientWidth := FMaxClientWidth;
-  AMaxClientHeight := FMaxClientHeight;
+  AMinClientWidth := PPIScale(FMinClientWidth);
+  AMinClientHeight := PPIScale(FMinClientHeight);
+  AMaxClientWidth := PPIScale(FMaxClientWidth);
+  AMaxClientHeight := PPIScale(FMaxClientHeight);
 end;
 
 procedure TTBToolWindow.SizeChanging(const AWidth, AHeight: Integer);

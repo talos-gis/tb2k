@@ -207,7 +207,8 @@ end;
   can't be unloaded. When a design-time package is uninstalled, it remains
   loaded until the IDE is restarted. }
 {$IFNDEF CLR}
-procedure UnregisterModuleItemClasses(AModule: {$IFDEF JR_D5} LongWord {$ELSE} Integer {$ENDIF});
+// pyscripter mod
+procedure UnregisterModuleItemClasses(AModule: {$IFDEF JR_D5} THandle {$ELSE} Integer {$ENDIF});
 var
   I: Integer;
   Info: TItemClassInfo;

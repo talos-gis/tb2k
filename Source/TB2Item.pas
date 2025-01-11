@@ -40,7 +40,11 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   {$IFDEF CLR} TB2OleMarshal, {$ENDIF}
-  StdCtrls, CommCtrl, Menus, ActnList, ImgList, TB2Anim;
+  StdCtrls, CommCtrl, Menus, ActnList, ImgList, TB2Anim,
+  {$IF CompilerVersion >= 24} // for Delphi XE3 and up
+  System.UITypes,
+  {$IFEND}
+  Types;
 
 type
   TTBCustomItem = class;
@@ -110,6 +114,9 @@ type
     FHelpContext: THelpContext;
     FHint: String;
     FImageIndex: TImageIndex;
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    FImageName: TImageName;
+    {$IFEND}
     FImages: TCustomImageList;
     FImagesChangeLink: TTBImageChangeLink;
     FItems: TList;
@@ -165,6 +172,12 @@ type
     procedure SetEnabled(Value: Boolean);
     procedure SetGroupIndex(Value: Integer);
     procedure SetImageIndex(Value: TImageIndex);
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    procedure CheckImageIndexAndName;
+    function GetImageList: TCustomImageList;
+    function IsImageNameStored: Boolean;
+    procedure SetImageName(const Value: TImageName);
+    {$IFEND}
     procedure SetImages(Value: TCustomImageList);
     procedure SetInheritOptions(Value: Boolean);
     procedure SetLinkSubitems(Value: TTBCustomItem);
@@ -247,6 +260,9 @@ type
     property HelpContext: THelpContext read FHelpContext write FHelpContext stored IsHelpContextStored default 0;
     property Hint: String read FHint write FHint stored IsHintStored;
     property ImageIndex: TImageIndex read FImageIndex write SetImageIndex stored IsImageIndexStored default -1;
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    property ImageName: TImageName read FImageName write SetImageName stored IsImageNameStored;
+    {$IFEND}
     property Images: TCustomImageList read FImages write SetImages;
     property InheritOptions: Boolean read FInheritOptions write SetInheritOptions default True;
     property Items[Index: Integer]: TTBCustomItem read GetItem; default;
@@ -277,6 +293,9 @@ type
     function IsHelpContextLinked: Boolean; override;
     function IsHintLinked: Boolean; override;
     function IsImageIndexLinked: Boolean; override;
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    function IsImageNameLinked: Boolean; override;
+    {$IFEND}
     function IsShortCutLinked: Boolean; override;
     function IsVisibleLinked: Boolean; override;
     function IsOnExecuteLinked: Boolean; override;
@@ -323,6 +342,14 @@ type
     FView: TTBView;
     procedure AccSelect(const AExecute: Boolean);
     function GetIndex: Integer;
+    function GetMenuImageTextSpace: Integer;
+    function GetMenuLeftTextMargin: Integer;
+    function GetMenuRightTextMargin: Integer;
+    function GetMenuVerticalMargin: Integer;
+    function GetDropdownArrowMargin: Integer;
+    function GetDropdownArrowWidth: Integer;
+    function GetDropdownComboArrowWidth: Integer;
+    function GetDropdownComboMargin: Integer;
   protected
     FAccObjectInstance: TTBBaseAccObject;
     procedure CalcSize(const Canvas: TCanvas; var AWidth, AHeight: Integer);
@@ -337,6 +364,7 @@ type
     function GetCaptionText: String; virtual;
     procedure GetCursor(const Pt: TPoint; var ACursor: HCURSOR); virtual;
     function GetImageList: TCustomImageList;
+    function GetImageSize: TSize; virtual;
     function ImageShown: Boolean;
     function IsRotated: Boolean;
     function IsToolbarSize: Boolean;
@@ -353,7 +381,18 @@ type
       IsSelected, IsPushed, UseDisabledShadow: Boolean); virtual;
     procedure PostAccSelect(const AExecute: Boolean);
     function UsesSameWidth: Boolean; virtual;
-  public
+    function PPIScale(Value: Integer): Integer;
+
+    property tbMenuVerticalMargin: Integer read GetMenuVerticalMargin;
+    property tbMenuImageTextSpace: Integer read GetMenuImageTextSpace;
+    property tbMenuLeftTextMargin: Integer read GetMenuLeftTextMargin;
+    property tbMenuRightTextMargin: Integer read GetMenuRightTextMargin;
+    property tbDropdownArrowWidth: Integer read GetDropdownArrowWidth;
+    property tbDropdownArrowMargin:  Integer read GetDropdownArrowMargin;
+    property tbDropdownComboArrowWidth: Integer read GetDropdownComboArrowWidth;
+    property tbDropdownComboMargin: Integer read GetDropdownComboMargin;
+
+ public
     State: set of (tbisInvalidated, tbisLineSep);
     property BoundsRect: TRect read FBoundsRect;
     property Clipped: Boolean read FClipped;
@@ -444,6 +483,8 @@ type
     procedure StopAllTimers;
     procedure StopTimer(const ATimer: TTBViewTimerID);
     procedure UpdateCurParentItem;
+    function GetLineSpacing: Integer;
+    function GetMenuScrollArrowHeight: Integer;
   protected
     FAccObjectInstance: TTBBaseAccObject;
     procedure AutoSize(AWidth, AHeight: Integer); virtual;
@@ -465,6 +506,9 @@ type
     procedure KeyDown(var Key: Word; Shift: TShiftState); virtual;
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
     procedure SetAccelsVisibility(AShowAccels: Boolean);
+    function PPIScale(Value: Integer): Integer;
+    property tbMenuScrollArrowHeight: Integer read GetMenuScrollArrowHeight;
+    property tbLineSpacing: Integer read GetLineSpacing;
   public
     constructor Create(AOwner: TComponent; AParentView: TTBView;
       AParentItem: TTBCustomItem; AWindow: TWinControl;
@@ -555,6 +599,9 @@ type
     property HelpContext;
     property Hint;
     property ImageIndex;
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    property ImageName;
+    {$IFEND}
     property Images;
     property InheritOptions;
     property MaskOptions;
@@ -596,6 +643,9 @@ type
     property HelpContext;
     property Hint;
     property ImageIndex;
+    {$IF CompilerVersion >= 34} // for Delphi Sydney and up
+    property ImageName;
+    {$IFEND}
     property Images;
     property InheritOptions;
     property LinkSubitems;
@@ -626,12 +676,19 @@ type
   end;
 
   TTBSeparatorItemViewer = class(TTBItemViewer)
+  private
+    function GetMenuSeparatorOffset: Integer;
+    function GetLineSepOffset: Integer;
+    function GetDockedLineSepOffset: Integer;
   protected
     procedure CalcSize(const Canvas: TCanvas;
       var AWidth, AHeight: Integer); override;
     procedure Paint(const Canvas: TCanvas; const ClientAreaRect: TRect;
       IsSelected, IsPushed, UseDisabledShadow: Boolean); override;
     function UsesSameWidth: Boolean; override;
+    property tbMenuSeparatorOffset: Integer read GetMenuSeparatorOffset;
+    property tbLineSepOffset: Integer read GetLineSepOffset;
+    property tbDockedLineSepOffset: Integer read GetDockedLineSepOffset;
   end;
 
   TTBControlItem = class(TTBCustomItem)
@@ -800,25 +857,6 @@ const
   tbMenuBkColor = clBtnFace;
   tbMenuTextColor = clBtnText;
   {$ENDIF}
-
-  tbMenuVerticalMargin = 4;
-  tbMenuImageTextSpace = 1;
-  tbMenuLeftTextMargin = 2;
-  tbMenuRightTextMargin = 3;
-
-  tbMenuSeparatorOffset = 12;
-
-  tbMenuScrollArrowHeight = 19;
-
-  tbDropdownArrowWidth = 8;
-  tbDropdownArrowMargin = 3;
-  tbDropdownComboArrowWidth = 11;
-  tbDropdownComboMargin = 2;
-
-  tbLineSpacing = 6;
-  tbLineSepOffset = 1;
-  tbDockedLineSepOffset = 4;
-
   WM_TB2K_CLICKITEM = WM_USER + $100;
 
 function TBGetItems(const AObject: TObject): TTBCustomItem;
@@ -833,6 +871,9 @@ implementation
 uses
   {$IFDEF CLR} System.Runtime.InteropServices, System.Text, System.Threading,
     Types, WinUtils, {$ENDIF}
+  {$IF CompilerVersion >= 33}
+  TB2DocK,
+  {$IFEND}
   TB2Consts, TB2Common, IMM, TB2Acc;
 
 {$UNDEF ALLOCHWND_CLASSES}
@@ -841,6 +882,22 @@ uses
     {$DEFINE ALLOCHWND_CLASSES}
   {$ENDIF}
 {$ENDIF}
+const
+  _tbMenuVerticalMargin = 4;
+  _tbMenuImageTextSpace = 1;
+  _tbMenuLeftTextMargin = 2;
+  _tbMenuRightTextMargin = 3;
+  _tbDropdownArrowWidth = 8;
+  _tbDropdownArrowMargin = 3;
+  _tbDropdownComboArrowWidth = 11;
+  _tbDropdownComboMargin = 2;
+
+  _tbMenuSeparatorOffset = 12;
+  _tbLineSepOffset = 1;
+  _tbDockedLineSepOffset = 4;
+
+  _tbMenuScrollArrowHeight = 19;
+  _tbLineSpacing = 6;
 
 var
   LastPos: TPoint;
@@ -1049,6 +1106,14 @@ begin
   Result := inherited IsImageIndexLinked and
     (FClient.ImageIndex = (Action as TCustomAction).ImageIndex);
 end;
+
+{$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+function TTBCustomItemActionLink.IsImageNameLinked: Boolean;
+begin
+  Result := inherited IsImageNameLinked and
+    (FClient.ImageName = (Action as TCustomAction).ImageName);
+end;
+{$IFEND}
 
 function TTBCustomItemActionLink.IsShortCutLinked: Boolean;
 begin
@@ -1772,6 +1837,12 @@ begin
   Opposite := Assigned(ParentView) and (vsOppositePopup in ParentView.FState);
   Result := GetPopupWindowClass.CreatePopupWindow(nil, ParentView, ParentItem,
     Customizing);
+  {$IF CompilerVersion >= 33}
+  if Assigned(ParentView) then
+    Result.FCurrentPPI := ParentView.Window.CurrentPPI
+  else
+    Result.FCurrentPPI := Screen.MonitorFromPoint(APopupPoint).PixelsPerInch;
+  {$IFEND}
   try
     if Assigned(ChevronParentView) then begin
       ChevronParentView.FreeNotification(Result.View);
@@ -2218,6 +2289,9 @@ begin
   end
   else begin
     { Sender is FImages }
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    CheckImageIndexAndName;
+    {$IFEND}
     Resize := False;
     if (FImagesChangeLink.FLastWidth <> FImages.Width) or
        (FImagesChangeLink.FLastHeight <> FImages.Height) then begin
@@ -2230,7 +2304,17 @@ begin
 end;
 
 procedure TTBCustomItem.SubMenuImagesChanged;
+{$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+var
+  I: Integer;
+{$IFEND}
 begin
+  {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+  // When SubMenuImages is changed we need to update the ImageIndex and
+  // ImageName of the subitems
+  for I := 0 to Count - 1 do
+    Items[I].CheckImageIndexAndName;
+  {$IFEND}
   Notify(tbicSubMenuImagesChanged, -1, nil);
 end;
 
@@ -2299,13 +2383,67 @@ end;
 procedure TTBCustomItem.SetImageIndex(Value: TImageIndex);
 var
   HadNoImage: Boolean;
+  {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+  IL: TCustomImageList;
+  {$IFEND}
 begin
   if FImageIndex <> Value then begin
+    {$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+    IL := GetImageList;
+    if Assigned(IL) and IL.IsImageNameAvailable then
+      FImageName := IL.GetNameByIndex(Value);
+    {$IFEND}
     HadNoImage := FImageIndex = -1;
     FImageIndex := Value;
     Change(HadNoImage xor (Value = -1));
   end;
 end;
+
+{$IF CompilerVersion >= 34} // Robert: for Delphi Sydney and up
+procedure TTBCustomItem.CheckImageIndexAndName;
+var
+  IL: TCustomImageList;
+begin
+  IL := GetImageList;
+  if Assigned(IL) and IL.IsImageNameAvailable then
+    IL.CheckIndexAndName(FImageIndex, FImageName);
+end;
+
+function TTBCustomItem.GetImageList: TCustomImageList;
+// Robert: used by SetImageIndex/SetImageName to get the correct ImageList
+// From TB2Reg.TTBItemImageIndexPropertyEditor.GetImageListAt
+var
+  Item: TTBCustomItem;
+begin
+  Item := Self;
+  repeat
+    Result := Item.Images;
+    if Assigned(Result) then
+      Break;
+    Item := Item.Parent;
+    if Item = nil then
+      Break;
+    Result := Item.SubMenuImages;
+  until Assigned(Result);
+end;
+
+function TTBCustomItem.IsImageNameStored: Boolean;
+begin
+  Result := (ActionLink = nil) or not FActionLink.IsImageNameLinked;
+end;
+
+procedure TTBCustomItem.SetImageName(const Value: TImageName);
+var
+  IL: TCustomImageList;
+begin
+  if Value <> FImageName then begin
+    FImageName := Value;
+    IL := GetImageList;
+    if Assigned(IL) and IL.IsImageNameAvailable then
+      SetImageIndex(IL.GetIndexByName(Value));  // Update ImageIndex and invalidate
+  end;
+end;
+{$IFEND}
 
 function TTBCustomItem.ChangeImages(var AImages: TCustomImageList;
   const Value: TCustomImageList; var AChangeLink: TTBImageChangeLink): Boolean;
@@ -2511,11 +2649,26 @@ procedure TTBSeparatorItemViewer.CalcSize(const Canvas: TCanvas;
 begin
   if not IsToolbarStyle then
     { Office 2000's menu separators have a hard-coded height of 10 }
-    AHeight := 10
+    AHeight := PPIScale(10)
   else begin
-    AWidth := 6;
-    AHeight := 6;
+    AWidth := PPIScale(6);
+    AHeight := PPIScale(6);
   end;
+end;
+
+function TTBSeparatorItemViewer.GetLineSepOffset: Integer;
+begin
+  Result := PPIScale(_tbLineSepOffset);
+end;
+
+function TTBSeparatorItemViewer.GetDockedLineSepOffset: Integer;
+begin
+  Result := PPIScale(_tbDockedLineSepOffset);
+end;
+
+function TTBSeparatorItemViewer.GetMenuSeparatorOffset: Integer;
+begin
+  Result := PPIScale(_tbMenuSeparatorOffset);
 end;
 
 procedure TTBSeparatorItemViewer.Paint(const Canvas: TCanvas;
@@ -2536,7 +2689,7 @@ begin
   if LineSep then
     Horiz := not Horiz;
   if Horiz then begin
-    R.Top := R.Bottom div 2 - 1;
+    R.Top := R.Bottom div 2 - PPIScale(1);
     if not ToolbarStyle then
       InflateRect(R, -tbMenuSeparatorOffset, 0)
     else if LineSep then begin
@@ -2548,7 +2701,7 @@ begin
     DrawEdge(DC, R, EDGE_ETCHED, BF_TOP);
   end
   else begin
-    R.Left := R.Right div 2 - 1;
+    R.Left := R.Right div 2 - PPIScale(1);
     if LineSep then
       InflateRect(R, 0, -tbDockedLineSepOffset);
     DrawEdge(DC, R, EDGE_ETCHED, BF_LEFT);
@@ -2651,6 +2804,11 @@ begin
   QueueClick(Self, Ord(AExecute));
 end;
 
+function TTBItemViewer.PPIScale(Value: Integer): Integer;
+begin
+  Result := FView.PPIScale(Value);
+end;
+
 function TTBItemViewer.IsAccessible: Boolean;
 { Returns True if MSAA clients should know about the viewer, specifically
   if it's either shown, off-edge, or clipped (in other words, not completely
@@ -2714,22 +2872,27 @@ var
   V: TTBView;
 begin
   Result := Item.Images;
-  if Assigned(Result) then
-    Exit;
-  V := View;
-  repeat
-    if Assigned(V.FCurParentItem) then begin
-      Result := V.FCurParentItem.SubMenuImages;
-      if Assigned(Result) then
-        Break;
-    end;
-    if Assigned(V.FParentItem) then begin
-      Result := V.FParentItem.SubMenuImages;
-      if Assigned(Result) then
-        Break;
-    end;
-    V := V.FParentView;
-  until V = nil;
+  if not Assigned(Result) then begin
+    V := View;
+    repeat
+      if Assigned(V.FCurParentItem) then begin
+        Result := V.FCurParentItem.SubMenuImages;
+        if Assigned(Result) then
+          Break;
+      end;
+      if Assigned(V.FParentItem) then begin
+        Result := V.FParentItem.SubMenuImages;
+        if Assigned(Result) then
+          Break;
+      end;
+      V := V.FParentView;
+    until V = nil;
+  end;
+end;
+
+function TTBItemViewer.GetImageSize: TSize;
+begin
+  Result := SpGetScaledVirtualImageListSize(View.Window, GetImageList);
 end;
 
 function TTBItemViewer.IsRotated: Boolean;
@@ -2749,15 +2912,17 @@ var
   TextMetrics: TTextMetric;
   H, LeftMargin: Integer;
   ImgList: TCustomImageList;
+  ImgListSize: TSize;
   S: String;
   RotatedFont, SaveFont: HFONT;
 begin
   ToolbarStyle := IsToolbarStyle;
   DC := Canvas.Handle;
   ImgList := GetImageList;
+  ImgListSize := GetImageSize;
   if ToolbarStyle then begin
-    AWidth := 6;
-    AHeight := 6;
+    AWidth := PPIScale(6);
+    AHeight := PPIScale(6);
   end
   else begin
     AWidth := 0;
@@ -2769,7 +2934,7 @@ begin
       Inc(AHeight, TextMetrics.tmHeight);
       Inc(AWidth, GetTextWidth(DC, GetCaptionText, True));
       if ToolbarStyle then
-        Inc(AWidth, 6);
+        Inc(AWidth, PPIScale(6));
     end
     else begin
       { Vertical text isn't always the same size as horizontal text, so we have
@@ -2780,21 +2945,21 @@ begin
       Inc(AWidth, TextMetrics.tmHeight);
       Inc(AHeight, GetTextWidth(DC, GetCaptionText, True));
       if ToolbarStyle then
-        Inc(AHeight, 6);
+        Inc(AHeight, PPIScale(6));
       SelectObject(DC, SaveFont);
       DeleteObject(RotatedFont);
     end;
   end;
   if ToolbarStyle and ImageShown and Assigned(ImgList) then begin
     if not IsRotated and not(tboImageAboveCaption in Item.EffectiveOptions) then begin
-      Inc(AWidth, ImgList.Width + 1);
-      if AHeight < ImgList.Height + 6 then
-        AHeight := ImgList.Height + 6;
+      Inc(AWidth, ImgListSize.cx + PPIScale(1));
+      if AHeight < ImgListSize.cy + PPIScale(6) then
+        AHeight := ImgListSize.cy + PPIScale(6);
     end
     else begin
-      Inc(AHeight, ImgList.Height);
-      if AWidth < ImgList.Width + 7 then
-        AWidth := ImgList.Width + 7;
+      Inc(AHeight, ImgListSize.cy);
+      if AWidth < ImgListSize.cx + PPIScale(7) then
+        AWidth := ImgListSize.cx + PPIScale(7);
     end;
   end;
   if ToolbarStyle and (tbisSubmenu in Item.ItemStyle) then begin
@@ -2811,10 +2976,10 @@ begin
   if not ToolbarStyle then begin
     Inc(AHeight, TextMetrics.tmExternalLeading + tbMenuVerticalMargin);
     if Assigned(ImgList) then begin
-      H := ImgList.Height + 3;
+      H := ImgListSize.cy + PPIScale(3);
       if H > AHeight then
         AHeight := H;
-      LeftMargin := MulDiv(ImgList.Width + 3, AHeight, H);
+      LeftMargin := MulDiv(ImgListSize.cx + PPIScale(3), AHeight, H);
     end
     else
       LeftMargin := AHeight;
@@ -2822,7 +2987,7 @@ begin
       tbMenuRightTextMargin);
     S := Item.GetShortCutText;
     if S <> '' then
-      Inc(AWidth, (AHeight - 6) + GetTextWidth(DC, S, True));
+      Inc(AWidth, (AHeight - PPIScale(6)) + GetTextWidth(DC, S, True));
     Inc(AWidth, AHeight);
   end;
 end;
@@ -2837,7 +3002,7 @@ var
     if not IsRotated then
       DrawTextStr(DC, ACaption, ARect, AFormat)
     else
-      DrawRotatedText(DC, ACaption, ARect, AFormat);
+      DrawRotatedText(DC, ACaption, ARect, AFormat, PPIScale);
   end;
 
 var
@@ -2849,10 +3014,10 @@ begin
   else begin
     ShadowColor := GetSysColor(COLOR_BTNSHADOW);
     HighlightColor := GetSysColor(COLOR_BTNHIGHLIGHT);
-    OffsetRect(ARect, 1, 1);
+    OffsetRect(ARect, PPIScale(1), PPIScale(1));
     SaveTextColor := SetTextColor(DC, HighlightColor);
     Draw;
-    OffsetRect(ARect, -1, -1);
+    OffsetRect(ARect, -PPIScale(1), -PPIScale(1));
     SetTextColor(DC, ShadowColor);
     Draw;
     SetTextColor(DC, SaveTextColor);
@@ -2900,24 +3065,23 @@ var
     Bmp := TBitmap.Create;
     try
       Bmp.Monochrome := True;
-      Bmp.Width := MenuCheckWidth;
-      Bmp.Height := MenuCheckHeight;
+      Bmp.SetSize(MenuCheckWidth, MenuCheckHeight);
       BR := Rect(0, 0, MenuCheckWidth, MenuCheckHeight);
       DrawFrameControl(Bmp.Canvas.Handle, BR, DFC_MENU, DFCS_MENUARROW);
       OffsetRect(BR, ClientAreaRect.Right - MenuCheckWidth,
         ClientAreaRect.Top + ((ClientAreaRect.Bottom - ClientAreaRect.Top) - MenuCheckHeight) div 2);
       if not UseDisabledShadow then begin
         if ShowEnabled and (tbisCombo in Item.ItemStyle) and IsSelected then begin
-          OffsetRect(BR, 1, 1);
+          OffsetRect(BR, PPIScale(1), PPIScale(1));
           DrawWithColor(clBtnText);
         end
         else
           DrawWithColor(Canvas.Font.Color);
       end
       else begin
-        OffsetRect(BR, 1, 1);
+        OffsetRect(BR, PPIScale(1), PPIScale(1));
         DrawWithColor(clBtnHighlight);
-        OffsetRect(BR, -1, -1);
+        OffsetRect(BR, -PPIScale(1), -PPIScale(1));
         DrawWithColor(clBtnShadow);
       end;
     finally
@@ -2935,21 +3099,21 @@ var
       X := (R.Left + R.Right) div 2;
       Y := (R.Top + R.Bottom) div 2;
       if not Rotated then begin
-        Dec(Y);
-        P[0].X := X-2;
+        Dec(Y, PPIScale(1));
+        P[0].X := X-PPIScale(2);
         P[0].Y := Y;
-        P[1].X := X+2;
+        P[1].X := X+PPIScale(2);
         P[1].Y := Y;
         P[2].X := X;
-        P[2].Y := Y+2;
+        P[2].Y := Y+PPIScale(2);
       end
       else begin
-        Dec(X);
+        Dec(X, PPIScale(1));
         P[0].X := X;
-        P[0].Y := Y+2;
+        P[0].Y := Y+PPIScale(2);
         P[1].X := X;
-        P[1].Y := Y-2;
-        P[2].X := X-2;
+        P[1].Y := Y-PPIScale(2);
+        P[2].X := X-PPIScale(2);
         P[2].Y := Y;
       end;
       Canvas.Pen.Color := AColor;
@@ -2961,9 +3125,9 @@ var
     if not UseDisabledShadow then
       DrawWithColor(Canvas.Font.Color)
     else begin
-      OffsetRect(R, 1, 1);
+      OffsetRect(R, PPIScale(1), PPIScale(1));
       DrawWithColor(clBtnHighlight);
-      OffsetRect(R, -1, -1);
+      OffsetRect(R, -PPIScale(1), -PPIScale(1));
       DrawWithColor(clBtnShadow);
     end;
   end;
@@ -2988,6 +3152,7 @@ var
   R, RC, RD: TRect;
   S: String;
   ImgList: TCustomImageList;
+  ImgListSize: TSize;
   I, X, Y: Integer;
   BlackPoints: array[0..6] of TPoint;
   WhitePoints: array[0..4] of TPoint;
@@ -2999,14 +3164,15 @@ begin
   ShowEnabled := Item.Enabled or View.Customizing;
   HasArrow := (tbisSubmenu in Item.ItemStyle) and
     ((tbisCombo in Item.ItemStyle) or (tboDropdownArrow in Item.EffectiveOptions));
-  MenuCheckWidth := GetSystemMetrics(SM_CXMENUCHECK);
-  MenuCheckHeight := GetSystemMetrics(SM_CYMENUCHECK);
+  MenuCheckWidth := {$IF CompilerVersion>= 33}FView.Window.{$IFEND}GetSystemMetrics(SM_CXMENUCHECK);
+  MenuCheckHeight := {$IF CompilerVersion>= 33}FView.Window.{$IFEND}GetSystemMetrics(SM_CYMENUCHECK);
   ImgList := GetImageList;
+  ImgListSize := GetImageSize;
   ImageIsShown := ImageShown and Assigned(ImgList);
   LeftMargin := 0;
   if not ToolbarStyle then begin
     if Assigned(ImgList) then
-      LeftMargin := MulDiv(ImgList.Width + 3, ClientAreaRect.Bottom, ImgList.Height + 3)
+      LeftMargin := MulDiv(ImgListSize.cx + PPIScale(3), ClientAreaRect.Bottom, ImgListSize.cy + PPIScale(3))
     else
       LeftMargin := ClientAreaRect.Bottom;
   end;
@@ -3045,21 +3211,21 @@ begin
     end;
     if HasArrow then begin
       if not(tbisCombo in Item.ItemStyle) and IsPushed then
-        OffsetRect(RD, 1, 1);
+        OffsetRect(RD, PPIScale(1), PPIScale(1));
       DrawDropdownArrow(RD, not(tbisCombo in Item.ItemStyle) and
         (View.Orientation = tbvoVertical));
     end;
-    InflateRect(RC, -1, -1);
+    InflateRect(RC, -PPIScale(1), -PPIScale(1));
     if Item.Checked and not (IsSelected and ShowEnabled) then begin
       Canvas.Brush.Bitmap := GetDitherBitmap;
       Canvas.FillRect(RC);
       Canvas.Brush.Style := bsClear;
     end;
-    InflateRect(RC, -1, -1);
+    InflateRect(RC, -PPIScale(1), -PPIScale(1));
     if Item.Checked or
        ((IsSelected and IsPushed) and
         (not(tbisCombo in Item.ItemStyle) or View.FCapture)) then
-      OffsetRect(RC, 1, 1);
+      OffsetRect(RC, PPIScale(1), PPIScale(1));
     if HasArrow and not(tbisCombo in Item.ItemStyle) then begin
       if View.Orientation <> tbvoVertical then
         Dec(RC.Right, tbDropdownArrowWidth)
@@ -3095,9 +3261,9 @@ begin
     if ToolbarStyle then begin
       if ImageIsShown then begin
         if not IsRotated and not(tboImageAboveCaption in Item.EffectiveOptions) then
-          Inc(R.Left, ImgList.Width + 1)
+          Inc(R.Left, ImgListSize.cx + PPIScale(1))
         else
-          Inc(R.Top, ImgList.Height + 1);
+          Inc(R.Top, ImgListSize.cy + PPIScale(1));
       end;
       DrawItemCaption(Canvas, R, S, UseDisabledShadow,
         DT_SINGLELINE or DT_CENTER or DT_VCENTER or DrawTextFlags)
@@ -3108,7 +3274,7 @@ begin
         is 4 pixels less than the total item height. This is done so underlined
         characters aren't displayed too low. }
       if (R.Bottom - R.Top) - (TextMetrics.tmHeight + TextMetrics.tmExternalLeading) = tbMenuVerticalMargin then
-        Dec(R.Bottom);
+        Dec(R.Bottom, PPIScale(1));
       Inc(R.Top, TextMetrics.tmExternalLeading);
       DrawItemCaption(Canvas, R, S, UseDisabledShadow,
         DT_SINGLELINE or DT_LEFT or DT_VCENTER or DrawTextFlags);
@@ -3125,7 +3291,7 @@ begin
         is 4 pixels less than the total item height. This is done so underlined
         characters aren't displayed too low. }
       if (R.Bottom - R.Top) - (TextMetrics.tmHeight + TextMetrics.tmExternalLeading) = tbMenuVerticalMargin then
-        Dec(R.Bottom);
+        Dec(R.Bottom, PPIScale(1));
       Inc(R.Top, TextMetrics.tmExternalLeading);
       DrawItemCaption(Canvas, R, S, UseDisabledShadow,
         DT_SINGLELINE or DT_LEFT or DT_VCENTER or DT_NOPREFIX);
@@ -3137,7 +3303,7 @@ begin
         if IsSelected and ShowEnabled then
           DrawEdge(Canvas.Handle, R, BDR_SUNKENOUTER, BF_RECT or BF_MIDDLE)
         else begin
-          Dec(R.Left);
+          Dec(R.Left, PPIScale(1));
           if not IsSelected then
             DrawEdge(Canvas.Handle, R, EDGE_ETCHED, BF_LEFT)
           else
@@ -3153,32 +3319,33 @@ begin
     R := RC;
     if ToolbarStyle then begin
       if not IsRotated and not(tboImageAboveCaption in Item.EffectiveOptions) then
-        R.Right := R.Left + ImgList.Width + 2
+        R.Right := R.Left + ImgListSize.cx + PPIScale(2)
       else
-        R.Bottom := R.Top + ImgList.Height + 2;
+        R.Bottom := R.Top + ImgListSize.cy + PPIScale(2);
     end
     else begin
       R.Right := R.Left + LeftMargin;
       if (IsSelected and ShowEnabled) or Item.Checked then
         DrawEdge(Canvas.Handle, R, EdgeStyles[Item.Checked], BF_RECT or BF_MIDDLE);
       if Item.Checked and not IsSelected then begin
-        InflateRect(R, -1, -1);
+        InflateRect(R, -PPIScale(1), -PPIScale(1));
         Canvas.Brush.Bitmap := GetDitherBitmap;
         Canvas.FillRect(R);
         Canvas.Brush.Style := bsClear;
-        InflateRect(R, 1, 1);
+        InflateRect(R, PPIScale(1), PPIScale(1));
       end;
       if Item.Checked then
-        OffsetRect(R, 1, 1);
+        OffsetRect(R, PPIScale(1), PPIScale(1));
     end;
     if ImageIsShown then begin
-      X := R.Left + ((R.Right - R.Left) - ImgList.Width) div 2;
-      Y := R.Top + ((R.Bottom - R.Top) - ImgList.Height) div 2;
+      X := R.Left + ((R.Right - R.Left) - ImgListSize.cx) div 2;
+      Y := R.Top + ((R.Bottom - R.Top) - ImgListSize.cy) div 2;
       if ImgList is TTBCustomImageList then
         TTBCustomImageList(ImgList).DrawState(Canvas, X, Y, Item.ImageIndex,
           ShowEnabled, IsSelected, Item.Checked)
       else
-        ImgList.Draw(Canvas, X, Y, Item.ImageIndex, ShowEnabled);
+        SpDrawVirtualImageList(Canvas, Rect(X, Y, X + ImgListSize.cx, Y + ImgListSize.cy),
+          ImgList, Item.ImageIndex, ShowEnabled);
     end
     else
       if not ToolbarStyle and Item.Checked then begin
@@ -3189,21 +3356,21 @@ begin
         if Item.RadioItem then begin
           Canvas.Pen.Color := clBtnText;
           Canvas.Brush.Color := clBtnText;
-          Canvas.RoundRect(X-3, Y-3, X+2, Y+2, 2, 2);
+          Canvas.RoundRect(X-PPIScale(3), Y-PPIScale(3), X+PPIScale(2), Y+PPIScale(2), PPIScale(2), PPIScale(2));
           Canvas.Pen.Color := clBtnHighlight;
           Canvas.Brush.Style := bsClear;
-          Canvas.RoundRect(X-4, Y-4, X+3, Y+3, 6, 6);
+          Canvas.RoundRect(X-PPIScale(4), Y-PPIScale(4), X+PPIScale(3), Y+PPIScale(3), PPIScale(6), PPIScale(6));
         end
         else begin
-          Dec(X, 2);
-          Inc(Y);
+          Dec(X, PPIScale(2));
+          Inc(Y, PPIScale(1));
           for I := Low(BlackPoints) to High(BlackPoints) do begin
-            BlackPoints[I].X := X + BlackCheckMarkPoints[I].X;
-            BlackPoints[I].Y := Y + BlackCheckMarkPoints[I].Y;
+            BlackPoints[I].X := X + PPIScale(BlackCheckMarkPoints[I].X);
+            BlackPoints[I].Y := Y + PPIScale(BlackCheckMarkPoints[I].Y);
           end;
           for I := Low(WhitePoints) to High(WhitePoints) do begin
-            WhitePoints[I].X := X + WhiteCheckMarkPoints[I].X;
-            WhitePoints[I].Y := Y + WhiteCheckMarkPoints[I].Y;
+            WhitePoints[I].X := X + PPIScale(WhiteCheckMarkPoints[I].X);
+            WhitePoints[I].Y := Y + PPIScale(WhiteCheckMarkPoints[I].Y);
           end;
           Canvas.Pen.Color := clBtnText;
           Polyline(Canvas.Handle, BlackPoints, Length(BlackPoints));
@@ -3218,9 +3385,49 @@ procedure TTBItemViewer.GetCursor(const Pt: TPoint; var ACursor: HCURSOR);
 begin
 end;
 
+function TTBItemViewer.GetDropdownArrowMargin: Integer;
+begin
+  Result := PPIScale(_tbDropdownArrowMargin);
+end;
+
+function TTBItemViewer.GetDropdownArrowWidth: Integer;
+begin
+  Result := PPIScale(_tbDropdownArrowWidth);
+end;
+
+function TTBItemViewer.GetDropdownComboArrowWidth: Integer;
+begin
+  Result := PPIScale(_tbDropdownComboArrowWidth);
+end;
+
+function TTBItemViewer.GetDropdownComboMargin: Integer;
+begin
+  Result := PPIScale(_tbDropdownComboMargin);
+end;
+
 function TTBItemViewer.GetIndex: Integer;
 begin
   Result := View.IndexOf(Self);
+end;
+
+function TTBItemViewer.GetMenuImageTextSpace: Integer;
+begin
+  Result := PPIScale(_tbMenuImageTextSpace);
+end;
+
+function TTBItemViewer.GetMenuLeftTextMargin: Integer;
+begin
+  Result := PPIScale(_tbMenuLeftTextMargin);
+end;
+
+function TTBItemViewer.GetMenuRightTextMargin: Integer;
+begin
+  Result := PPIScale(_tbMenuRightTextMargin);
+end;
+
+function TTBItemViewer.GetMenuVerticalMargin: Integer;
+begin
+  Result := PPIScale(_tbMenuVerticalMargin);
 end;
 
 function TTBItemViewer.IsToolbarSize: Boolean;
@@ -3242,7 +3449,7 @@ begin
     if IsToolbarStyle then
       W := tbDropdownComboArrowWidth
     else
-      W := GetSystemMetrics(SM_CXMENUCHECK);
+      W := {$IF CompilerVersion>= 33}FView.Window.{$IFEND}GetSystemMetrics(SM_CXMENUCHECK);
     Result := X < (BoundsRect.Right - BoundsRect.Left) - W;
   end;
 end;
@@ -4007,6 +4214,11 @@ begin
   Result := Assigned(FOpenViewer);
 end;
 
+function TTBView.PPIScale(Value: Integer): Integer;
+begin
+  Result := FWindow.PPIScale(Value);
+end;
+
 procedure TTBView.CloseChildPopups;
 begin
   if Assigned(FOpenViewerView) then
@@ -4624,7 +4836,6 @@ var
   Ctl: TControl;
   ChangedBold: Boolean;
   I, HighestSameWidthViewerWidth, Total, J, TotalVisibleItems: Integer;
-  IsFirst: Boolean;
   Viewer: TTBItemViewer;
   UseChevron, NonControlsOffEdge, TempViewerCreated: Boolean;
   Margins: TRect;
@@ -4642,6 +4853,8 @@ begin
     DC := GetDC(0);
     CalcCanvas.Handle := DC;
     CalcCanvas.Font.Assign(GetFont);
+    CalcCanvas.Font.Height :=
+      MulDiv(CalcCanvas.Font.Height, Window.CurrentPPI, CalcCanvas.Font.PixelsPerInch);
 
     SetLength(NewPositions, FViewers.Count);
 
@@ -4902,7 +5115,7 @@ begin
     TopY := Margins.Top;
     if AWrapOffset > 0 then begin
       Dec(AWrapOffset, Margins.Right);
-      if AWrapOffset < 1 then AWrapOffset := 1;
+      if AWrapOffset < PPIScale(1) then AWrapOffset := PPIScale(1);
     end;
     CurX := LeftX;
     CurY := TopY;
@@ -5026,10 +5239,10 @@ begin
   if (ABaseSize.X = 0) or (ABaseSize.Y = 0) then begin
     { If there are no visible items... }
     {}{scale this?}
-    ABaseSize.X := 23;
-    ABaseSize.Y := 22;
-    if TotalSize.X < 23 then TotalSize.X := 23;
-    if TotalSize.Y < 22 then TotalSize.Y := 22;
+    ABaseSize.X := PPIScale(23);
+    ABaseSize.Y := PPIScale(22);
+    if TotalSize.X < PPIScale(23) then TotalSize.X := PPIScale(23);
+    if TotalSize.Y < PPIScale(22) then TotalSize.Y := PPIScale(22);
   end;
 end;
 
@@ -5076,10 +5289,10 @@ procedure TTBView.GetMargins(AOrientation: TTBViewOrientation;
   var Margins: TRect);
 begin
   if AOrientation = tbvoFloating then begin
-    Margins.Left := 4;
-    Margins.Top := 2;
-    Margins.Right := 4;
-    Margins.Bottom := 1;
+    Margins.Left := PPIScale(4);
+    Margins.Top := PPIScale(2);
+    Margins.Right := PPIScale(4);
+    Margins.Bottom := PPIScale(1);
   end
   else begin
     Margins.Left := 0;
@@ -5097,6 +5310,16 @@ end;
 function TTBView.GetMDISystemMenuItem: TTBCustomItem;
 begin
   Result := nil;
+end;
+
+function TTBView.GetLineSpacing: Integer;
+begin
+  Result := PPIScale(_tbLineSpacing);
+end;
+
+function TTBView.GetMenuScrollArrowHeight: Integer;
+begin
+ Result := PPIScale(_tbMenuScrollArrowHeight);
 end;
 
 function TTBView.GetFont: TFont;
@@ -5180,7 +5403,7 @@ begin
       BmpDC := DrawCanvas.Handle;
       SaveIndex2 := SaveDC(BmpDC);
       SetWindowOrgEx(BmpDC, R1.Left, R1.Top, nil);
-      FWindow.Perform(WM_ERASEBKGND, WPARAM(BmpDC), 0);
+      FWindow.Perform(WM_ERASEBKGND, WPARAM(BmpDC), LPARAM(BmpDC)); // Robert: Pass BmpDC on LParam to support DoubleBuffered property
       RestoreDC(BmpDC, SaveIndex2);
     end;
 
@@ -5200,6 +5423,9 @@ begin
 
     { Initialize font }
     DrawCanvas.Font.Assign(GetFont);
+    DrawCanvas.Font.Height :=
+      MulDiv(DrawCanvas.Font.Height, Window.CurrentPPI, GetFont.PixelsPerInch);
+
     if Viewer.Item.Enabled then begin
       if not ToolbarStyle and IsSelected then
         DrawCanvas.Font.Color := clHighlightText
@@ -5669,9 +5895,9 @@ begin
   end
   else
     EndModal;
-  {$IFNDEF CLR}
-  Exit; asm db 0,'Toolbar2000 (C) 1998-2008 Jordan Russell',0 end;
-  {$ENDIF}
+//  {$IFNDEF CLR}
+//  Exit; asm db 0,'Toolbar2000 (C) 1998-2008 Jordan Russell',0 end;
+//  {$ENDIF}
 end;
 
 procedure TTBView.Scroll(ADown: Boolean);
@@ -6336,7 +6562,7 @@ constructor TTBPopupWindow.CreatePopupWindow(AOwner: TComponent;
 begin
   inherited Create(AOwner);
   Visible := False;
-  SetBounds(0, 0, 320, 240);
+  SetBounds(0, 0, PPIScale(320), PPIScale(240));
   ControlStyle := ControlStyle - [csCaptureMouse];
   ShowHint := True;
   Color := tbMenuBkColor;
@@ -6518,18 +6744,18 @@ procedure TTBPopupWindow.PaintScrollArrows;
   begin
     X := (R.Left + R.Right) div 2;
     Y := (R.Top + R.Bottom) div 2;
-    Dec(Y);
-    P[0].X := X-3;
+    Dec(Y, PPIScale(1));
+    P[0].X := X-PPIScale(3);
     P[0].Y := Y;
-    P[1].X := X+3;
+    P[1].X := X+PPIScale(3);
     P[1].Y := Y;
     P[2].X := X;
     P[2].Y := Y;
     if ADown then
-      Inc(P[2].Y, 3)
+      Inc(P[2].Y, PPIScale(3))
     else begin
-      Inc(P[0].Y, 3);
-      Inc(P[1].Y, 3);
+      Inc(P[0].Y, PPIScale(3));
+      Inc(P[1].Y, PPIScale(3));
     end;
     Canvas.Pen.Color := tbMenuTextColor;
     Canvas.Brush.Color := tbMenuTextColor;
@@ -6538,10 +6764,10 @@ procedure TTBPopupWindow.PaintScrollArrows;
 
 begin
   if FView.FShowUpArrow then
-    DrawArrow(Rect(0, 0, ClientWidth, tbMenuScrollArrowHeight), False);
+    DrawArrow(Rect(0, 0, ClientWidth, FView.tbMenuScrollArrowHeight), False);
   if FView.FShowDownArrow then
-    DrawArrow(Bounds(0, ClientHeight - tbMenuScrollArrowHeight,
-      ClientWidth, tbMenuScrollArrowHeight), True);
+    DrawArrow(Bounds(0, ClientHeight - FView.tbMenuScrollArrowHeight,
+      ClientWidth, FView.tbMenuScrollArrowHeight), True);
 end;
 
 procedure TTBPopupWindow.WMClose(var Message: TWMClose);
@@ -6926,7 +7152,6 @@ begin
     ImagesBitmapChanged(nil);
   end;
 end;
-
 
 { TTBBaseAccObject }
 

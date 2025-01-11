@@ -31,11 +31,13 @@ interface
 {$I TB2Ver.inc}
 
 uses
-  Windows, Classes, SysUtils, Messages, Controls, Forms;
+  Windows, Classes, SysUtils, Messages, Controls, Forms, Graphics, ImgList,
+  Types; // Robert XE4
 
 type
   THandleWMPrintNCPaintProc = procedure(Wnd: HWND; DC: HDC; AppData: TObject);
   TPaintHandlerProc = procedure(var Message: TWMPaint) of object;
+  TScalingFunction = function(Value: Integer): Integer of object;
 
   { The type of item a TList holds; it differs between Win32 and .NET VCL }
   TListItemType = {$IFNDEF CLR} Pointer {$ELSE} TObject {$ENDIF};
@@ -63,9 +65,9 @@ procedure DoubleBufferedRepaint(const Wnd: HWND);
 procedure DrawHalftoneInvertRect(const DC: HDC; const NewRect, OldRect: TRect;
   const NewSize, OldSize: TSize);
 procedure DrawRotatedText(const DC: HDC; AText: String; const ARect: TRect;
-  const AFormat: Cardinal);
+  const AFormat: Cardinal; ScalingFunction: TScalingFunction);
 procedure DrawSmallWindowCaption(const Wnd: HWND; const DC: HDC;
-  const ARect: TRect; const AText: String; const AActive: Boolean);
+  const ARect: TRect; const AText: String; const AActive: Boolean; PPI: Integer);
 function DrawTextStr(const DC: HDC; const AText: String; var ARect: TRect;
   const AFormat: UINT): Integer;
 function EscapeAmpersands(const S: String): String;
@@ -118,6 +120,41 @@ function TextOutStr(const DC: HDC; const X, Y: Integer;
   const AText: String): BOOL;
 function UsingMultipleMonitors: Boolean;
 
+{ VirtualImage helpers}
+// Robert: added support for TImageCollection and TVirtualImageList
+// TImageCollection and TVirtualImagelist were introduced on Rio.
+// Use RTTI to access fields, properties and methods of structures on
+// VirtualImageList and ImageCollection.
+// Otherwise we must include vclwinx.bpl package to the Requires section
+// of the dpk, doing so we must create different packages for different
+// Delphi versions. vclwinx was introduced in Delphi Seattle but
+// TImageCollection and TVirtualImagelist were introduced on Rio.
+// If we add vclwinx package and access TImageCollection and TVirtualImageList
+// directly then we can delete the following helpers:
+{$IF CompilerVersion >= 33} // for Delphi Rio and up
+procedure SpDrawDisabled(ACanvas: TCanvas; ABitmap: TBitmap; X, Y, DisabledOpacity: Integer; DisabledGrayscale: Boolean);
+{$IFEND}
+procedure SpDrawIconShadow(ACanvas: TCanvas; const ARect: TRect; ImageList: TCustomImageList; ImageIndex: Integer);
+function SpIsVirtualImageList(ImageList: TCustomImageList): Boolean;
+procedure SpDrawVirtualImageList(ACanvas: TCanvas; const ARect: TRect; ImageList: TCustomImageList; ImageIndex: Integer; Enabled: Boolean);
+function SpGetScaledVirtualImageListSize(C: TControl; IL: TCustomImageList): TSize;
+
+type
+  (*  Helper methods for TControl *)
+  TControlHelper = class helper for TControl
+  public
+    {$IF CompilerVersion <= 32}
+    function CurrentPPI: Integer;
+    function FCurrentPPI: Integer;
+    {$ELSE}
+    function CurrentPPI: Integer;
+    {$IFEND}
+    (* Scale a value according to the FCurrentPPI *)
+    function PPIScale(Value: integer): integer;
+    (* Reverse PPI Scaling  *)
+    function PPIUnScale(Value: integer): integer;
+  end;
+
 const
   PopupMenuWindowNCSize = 3;
   DT_HIDEPREFIX = $00100000;
@@ -127,7 +164,11 @@ implementation
 uses
   {$IFDEF CLR} Types, System.Security, System.Runtime.InteropServices,
     System.Text, MultiMon, {$ENDIF}
-  MMSYSTEM, TB2Version;
+  MMSYSTEM, TB2Version,
+  {$IF CompilerVersion >= 24} // for Delphi XE3 and up
+  System.UITypes,
+  {$IFEND}
+  Rtti;
 
 function ApplicationIsActive: Boolean;
 { Returns True if the application is in the foreground }
@@ -725,7 +766,7 @@ begin
 end;
 
 procedure DrawSmallWindowCaption(const Wnd: HWND; const DC: HDC;
-  const ARect: TRect; const AText: String; const AActive: Boolean);
+  const ARect: TRect; const AText: String; const AActive: Boolean; PPI: Integer);
 { Draws a (non-themed) small window caption bar.
   On Windows Vista, a custom routine is used to work around an ugly bug in
   DrawCaption that causes the text to be painted at the wrong coordinates.
@@ -762,6 +803,7 @@ var
   CaptionFont, SaveFont: HFONT;
   SaveBkMode: Integer;
   SaveTextColor: TColorRef;
+  LogFont: TLogFontW;
 begin
   if ARect.Right <= ARect.Left then
     Exit;
@@ -783,7 +825,9 @@ begin
     Inc(TextRect.Left, GetSystemMetrics(SM_CXEDGE));
     if (TextRect.Right > TextRect.Left) and
        GetSystemNonClientMetrics(NonClientMetrics) then begin
-      CaptionFont := CreateFontIndirect(NonClientMetrics.lfSmCaptionFont);
+      LogFont:= NonClientMetrics.lfSmCaptionFont;
+      LogFont.lfHeight := MulDiv(LogFont.lfHeight, PPI, Screen.PixelsPerInch);
+      CaptionFont := CreateFontIndirect(LogFont);
       if CaptionFont <> 0 then begin
         SaveFont := SelectObject(DC, CaptionFont);
         SaveBkMode := SetBkMode(DC, TRANSPARENT);
@@ -827,7 +871,7 @@ begin
               SelectObject(BmpDC, Bmp);
               SaveIndex := SaveDC(BmpDC);
               SetWindowOrgEx(BmpDC, R.Left, R.Top, nil);
-              SendMessage(Wnd, WM_ERASEBKGND, WPARAM(BmpDC), 0);
+              SendMessage(Wnd, WM_ERASEBKGND, WPARAM(BmpDC), LPARAM(BmpDC)); // Robert: Pass BmpDC on LParam to support DoubleBuffered property
               SendMessage(Wnd, WM_PAINT, WPARAM(BmpDC), 0);
               RestoreDC(BmpDC, SaveIndex);
               BitBlt(WndDC, R.Left, R.Top, R.Right - R.Left, R.Bottom - R.Top,
@@ -1248,7 +1292,7 @@ begin
 end;
 
 procedure DrawRotatedText(const DC: HDC; AText: String; const ARect: TRect;
-  const AFormat: Cardinal);
+  const AFormat: Cardinal; ScalingFunction: TScalingFunction);
 { Like DrawText, but draws the text at a 270 degree angle.
   The only format flag this function respects is DT_HIDEPREFIX. Text is always
   drawn centered. }
@@ -1295,7 +1339,7 @@ begin
   if (P > 0) and (AFormat and DT_HIDEPREFIX = 0) then begin
     SU := GetTextWidth(DC, Copy(AText, 1, P-1), False);
     FU := SU + GetTextWidth(DC, AText[P], False);
-    Inc(X, TextMetrics.tmDescent - 2);
+    Inc(X, TextMetrics.tmDescent - ScalingFunction(2));
     Pen := CreatePen(PS_SOLID, 1, GetTextColor(DC));
     SavePen := SelectObject(DC, Pen);
     MoveToEx(DC, X, Y + SU, nil);
@@ -1561,11 +1605,265 @@ begin
 end;
 {$ENDIF}
 
+{ VirtualImage helpers}
+
+{$IF CompilerVersion >= 33} // for Delphi Rio and up
+type
+  PColorRecArray = ^TColorRecArray;
+  TColorRecArray = array [0..0] of TColorRec;
+
+procedure SpDrawDisabled(ACanvas: TCanvas; ABitmap: TBitmap;
+  X, Y, DisabledOpacity: Integer; DisabledGrayscale: Boolean);
+var
+  BF: TBlendFunction;
+  I: Integer;
+  Src: Pointer;
+  Gray: Byte;
+begin
+  if Assigned(ABitmap) then begin
+    // Make the bitmap B/W, see TVirtualImageList.CreateDisabledBitmap
+    {$RANGECHECKS OFF}
+    Src := ABitmap.Scanline[ABitmap.Height - 1];
+    for I := 0 to ABitmap.Width * ABitmap.Height - 1 do
+    begin
+      if DisabledOpacity < 255 then
+        PColorRecArray(Src)[I].A := Round(PColorRecArray(Src)[I].A * DisabledOpacity / 255);
+      if DisabledGrayscale then
+      begin
+        Gray := Round(
+         (0.299 * PColorRecArray(Src)[I].R) +
+         (0.587 * PColorRecArray(Src)[I].G) +
+         (0.114 * PColorRecArray(Src)[I].B));
+        PColorRecArray(Src)[I].R := Gray;
+        PColorRecArray(Src)[I].G := Gray;
+        PColorRecArray(Src)[I].B := Gray;
+      end;
+    end;
+    {$RANGECHECKS ON}
+
+    // Blend draw
+    ABitmap.AlphaFormat := afPremultiplied;
+    BF.BlendOp := AC_SRC_OVER;
+    BF.BlendFlags := 0;
+    BF.SourceConstantAlpha := 255;
+    BF.AlphaFormat := AC_SRC_ALPHA;
+    Windows.AlphaBlend(ACanvas.Handle, X, Y, ABitmap.Width, ABitmap.Height,
+      ABitmap.Canvas.Handle, 0, 0, ABitmap.Width, ABitmap.Height, BF);
+  end;
+end;
+{$IFEND}
+
+procedure SpDrawIconShadow(ACanvas: TCanvas; const ARect: TRect;
+  ImageList: TCustomImageList; ImageIndex: Integer);
+// Used by Office XP skin, to paint a shadow of the glyphs
+var
+  ImageWidth, ImageHeight: Integer;
+  I, J: Integer;
+  Src, Dst: ^Cardinal;
+  S, C, CBRB, CBG: Cardinal;
+  B1, B2: TBitmap;
+begin
+  ImageWidth := ARect.Right - ARect.Left;
+  ImageHeight := ARect.Bottom - ARect.Top;
+
+  B1 := TBitmap.Create;
+  B2 := TBitmap.Create;
+  try
+    B1.PixelFormat := pf32bit;
+    B2.PixelFormat := pf32bit;
+    B1.SetSize(ImageWidth, ImageHeight);
+    B2.SetSize(ImageWidth, ImageHeight);
+
+    BitBlt(B1.Canvas.Handle, 0, 0, ImageWidth, ImageHeight, ACanvas.Handle, ARect.Left, ARect.Top, SRCCOPY);
+    BitBlt(B2.Canvas.Handle, 0, 0, ImageWidth, ImageHeight, ACanvas.Handle, ARect.Left, ARect.Top, SRCCOPY);
+
+    SpDrawVirtualImageList(B2.Canvas, Rect(0, 0, ImageWidth, ImageHeight), ImageList, ImageIndex, True);
+
+    for J := 0 to ImageHeight - 1 do
+    begin
+      Src := B2.ScanLine[J];
+      Dst := B1.ScanLine[J];
+      for I := 0 to ImageWidth - 1 do
+      begin
+        S := Src^;
+        if S <> Dst^ then
+        begin
+          CBRB := Dst^ and $00FF00FF;
+          CBG  := Dst^ and $0000FF00;
+          C := ((S and $00FF0000) shr 16 * 29 + (S and $0000FF00) shr 8 * 150 +
+            (S and $000000FF) * 76) shr 8;
+          C := (C div 3) + (255 - 255 div 3);
+          Dst^ := ((CBRB * C and $FF00FF00) or (CBG * C and $00FF0000)) shr 8;
+        end;
+        Inc(Src);
+        Inc(Dst);
+      end;
+    end;
+    BitBlt(ACanvas.Handle, ARect.Left, ARect.Top, ImageWidth, ImageHeight, B1.Canvas.Handle, 0, 0, SRCCOPY);
+  finally
+    B1.Free;
+    B2.Free;
+  end;
+end;
+
+function SpIsVirtualImageList(ImageList: TCustomImageList): Boolean;
+begin
+  Result := Assigned(ImageList) and (ImageList.ClassName = 'TVirtualImageList');
+end;
+
+procedure SpDrawVirtualImageList(ACanvas: TCanvas; const ARect: TRect;
+  ImageList: TCustomImageList; ImageIndex: Integer; Enabled: Boolean);
+{$IF CompilerVersion >= 33} // for Delphi Rio and up
+var
+  RttiC: TRttiContext;
+  IC, ILItems, ILItem, B: TObject;
+  V1, V2, V3: TValue;
+  DisabledOpacity: Integer;
+  DisabledGrayscale: Boolean;
+{$IFEND}
+begin
+  // Do not call ImageList.Draw, the ImageList holds all the glyphs from the
+  // ImageCollection that have the correct size based on the DPI of the parent
+  // Form. For example if the Form has 96 DPI the IL points to 16x16 glyphs,
+  // when we need to paint 32x32 glyphs it will extract the 16x16 bitmap and
+  // stretch it.
+  // To prevent the blur caused by the stretching we need to extract the correct
+  // size of the glyph from the ImageCollection and paint it manually.
+  if Assigned(ImageList) and (ImageIndex > -1) and (ImageIndex < ImageList.Count) then begin
+    {$IF CompilerVersion >= 33} // for Delphi Rio and up
+    // TImageCollection and TVirtualImagelist were introduced on Rio.
+    // Use RTTI to access fields, properties and methods of structures on
+    // VirtualImageList and ImageCollection.
+    // Otherwise we must include vclwinx.bpl package to the Requires section
+    // of the dpk, doing so we must create different packages for different
+    // Delphi versions. vclwinx was introduced in Delphi Seattle but
+    // TImageCollection and TVirtualImagelist were introduced on Rio.
+    if SpIsVirtualImageList(ImageList) then begin
+      RttiC := TRttiContext.Create;
+      IC := RttiC.GetType(ImageList.ClassType).GetProperty('ImageCollection').GetValue(ImageList).AsObject;
+      if Assigned(IC) then begin
+        // Replace ImageIndex with IL.Images[ImageIndex].CollectionIndex
+        ILItems := RttiC.GetType(ImageList.ClassType).GetProperty('Images').GetValue(ImageList).AsObject;
+        ILItem := RttiC.GetType(ILItems.ClassType).GetIndexedProperty('Items').GetValue(ILItems, [ImageIndex]).AsObject;
+        ImageIndex := RttiC.GetType(ILItem.ClassType).GetProperty('CollectionIndex').GetValue(ILItem).AsInteger;
+
+        if Enabled then begin
+          V1 := V1.From(ACanvas);
+          V2 := V2.From(ARect);
+          V3 := V3.From(ImageIndex);
+          RttiC.GetType(IC.ClassType).GetMethod('Draw').Invoke(IC, [V1, V2, V3, False]);
+        end
+        else begin
+          // Mimic TVirtualImageList disabled images painting, see TVirtualImageList.DoDraw
+          // Get the correct image from the ImageCollection, get the bitmap
+          // with the specified size if there is one, otherwise it gets a
+          // scaled image (the image is stretched using ImageCollection.InterpolationMode
+          B := RttiC.GetType(IC.ClassType).GetMethod('GetBitmap').Invoke(IC, [ImageIndex, ARect.Width, ARect.Height]).AsObject;
+          try
+            // Read DisabledOpacity and DisabledGrayscale properties from TVirtualImageList
+            DisabledOpacity := RttiC.GetType(ImageList.ClassType).GetProperty('DisabledOpacity').GetValue(ImageList).AsInteger;
+            DisabledGrayscale := RttiC.GetType(ImageList.ClassType).GetProperty('DisabledGrayscale').GetValue(ImageList).AsBoolean;
+            // Paint disabled
+            SpDrawDisabled(ACanvas, B as TBitmap, ARect.Left, ARect.Top, DisabledOpacity, DisabledGrayscale);
+          finally
+            B.Free;  // Free it, GetBitmap creates a bitmap and copies the source TWICImage
+          end;
+        end;
+      end;
+    end
+    else
+    {$IFEND}
+      // For older versions of Delphi
+      if Enabled then
+        ImageList.Draw(ACanvas, ARect.Left, ARect.Top, ImageIndex)
+      else
+        SpDrawIconShadow(ACanvas, ARect, ImageList, ImageIndex);
+  end;
+end;
+
+function SpGetScaledVirtualImageListSize(C: TControl; IL: TCustomImageList): TSize;
+//var
+//  ILPPI: Integer;
+begin
+  if Assigned(IL) then begin
+    Result.cx := IL.Width;
+    Result.cy := IL.Height;
+    {
+    Not needed anymore, it doubles the size,
+    seems to be fixed on Delphi 11 Alexandria.
+    Test needed on previous versions.
+
+    // Scale if IL is a VirtualImageList and the PPIs are different
+    if SpIsVirtualImageList(IL) and (IL.Owner is TControl) then begin
+      ILPPI := TControl(IL.Owner).CurrentPPI;
+      if ILPPI <> C.CurrentPPI then begin
+        // Do not use PPIScale
+        Result.cx := MulDiv(Result.cx, C.CurrentPPI, ILPPI);
+        Result.cy := MulDiv(Result.cy, C.CurrentPPI, ILPPI);
+      end;
+    end;
+    }
+  end
+  else begin
+    Result.cx := 0;
+    Result.cy := 0;
+  end;
+end;
+
+{ TControlHelper }
+
+{$IF CompilerVersion <= 32}
+function TControlHelper.CurrentPPI: Integer;
+begin
+  Result := Screen.PixelsPerInch;
+end;
+
+function TControlHelper.FCurrentPPI: Integer;
+begin
+  Result := Screen.PixelsPerInch;
+end;
+{$ELSE}
+function TControlHelper.CurrentPPI: Integer;
+begin
+  // For testing only
+  // On and Windows 10 and Delphi Rio and up, CurrentPPI returns incorrect value
+  // when changing DPI programatically by calling ScaleForPPI.
+  Result := FCurrentPPI;
+end;
+{$IFEND}
+
+function TControlHelper.PPIScale(Value: integer): integer;
+begin
+  Result := MulDiv(Value, FCurrentPPI, 96);
+end;
+
+function TControlHelper.PPIUnScale(Value: integer): integer;
+begin
+  Result := MulDiv(Value, 96, FCurrentPPI);
+end;
+
+// Kiriakos Vlahos: to keep the RTTI Pool alive and avoid continuously creating/destroying it
+// See also https://stackoverflow.com/questions/27368556/trtticontext-multi-thread-issue
+// Robert: performance gain but creates mem overhead
+var
+_RttiContext: TRttiContext;
+
+procedure _InitRttiPool;
+begin
+ _RttiContext := TRttiContext.Create;
+ _RttiContext.FindType('');
+end;
+
 initialization
+  _InitRttiPool;
   InitGradientFillFunc;
   {$IFNDEF CLR}
   InitMultiMonApis;
   LockSetForegroundWindowFunc := GetProcAddress(GetModuleHandle(user32),
     'LockSetForegroundWindow');
   {$ENDIF}
+
+finalization
+  _RttiContext.Free();
+
 end.

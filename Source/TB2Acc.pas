@@ -36,7 +36,8 @@ interface
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   {$IFDEF CLR} System.Runtime.InteropServices, {$ENDIF}
-  TB2Item;
+  TB2Item,
+  Types; // Robert XE4
 
 type
   { Our declaration for IAccessible }
@@ -123,6 +124,7 @@ type
   private
     {$IFNDEF CLR}
     FPrevious, FNext: TTBCustomAccObject;
+    class var AccessibilityFinalized: Boolean;
     {$ENDIF}
   public
     {$IFNDEF CLR}
@@ -466,6 +468,10 @@ begin
   finally
     LeaveCriticalSection(LastAccObjectCritSect);
   end;
+  // Fix #107: TTBCustomAccObject.Destroy is called after the critical section
+  // is deleted. MSAA client still holds acc. object references
+  if AccessibilityFinalized and (LastAccObject = nil) then
+    DeleteCriticalSection(LastAccObjectCritSect);
   inherited;
 end;
 {$ENDIF}
@@ -1388,6 +1394,11 @@ finalization
   DisconnectAccObjects;
   if NeedToUninitialize then
     CoUninitialize;
-  DeleteCriticalSection(LastAccObjectCritSect);
+  // Fix #107: TTBCustomAccObject.Destroy is called after the critical section
+  // is deleted. MSAA client still holds acc. object references
+  if LastAccObject = nil then
+    DeleteCriticalSection(LastAccObjectCritSect)
+  else
+    TTBCustomAccObject.AccessibilityFinalized := True;
 {$ENDIF}
 end.
